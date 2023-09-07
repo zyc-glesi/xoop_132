@@ -238,7 +238,7 @@ def start2() -> None:
             return
 
     # process frame 【图片批量替换成为人脸】中文解释：调用 get_temp_frame_paths 函数获取临时文件夹中的所有帧，然后调用 get_frame_processors_modules 函数获取所有的帧处理器模块，然后遍历这些模块，调用 process 函数处理帧，最后调用 post_process 函数。
-    temp_frame_paths = get_temp_frame_paths(roop.globals.target_path)
+    temp_frame_paths = get_temp_frame_paths2(roop.globals.output_temp_path)
     if temp_frame_paths:
         for frame_processor in get_frame_processors_modules(roop.globals.frame_processors):
             update_status('Progressing...', frame_processor.NAME)
@@ -246,6 +246,7 @@ def start2() -> None:
             frame_processor.post_process()
     else:
         update_status('Frames not found...')
+        print(roop.globals.output_temp_path)
         return
 
 
