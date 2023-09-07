@@ -73,7 +73,7 @@ def get_temp_frame_paths(target_path: str) -> List[str]:
     return glob.glob((os.path.join(glob.escape(temp_directory_path), '*.' + roop.globals.temp_frame_format)))
 
 
-def get_temp_frame_paths2(output_temp_path: str) -> List[str]:
+def get_temp_frame_paths_z(output_temp_path: str) -> List[str]:
     temp_directory_path = output_temp_path
     return glob.glob((os.path.join(glob.escape(temp_directory_path), '*.' + roop.globals.temp_frame_format)))
 
