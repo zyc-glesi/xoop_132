@@ -32,7 +32,6 @@ def parse_args() -> None:
     program.add_argument('-s', '--source', help='select an source image', dest='source_path')
     program.add_argument('-t', '--target', help='select an target image or video', dest='target_path')
     program.add_argument('-o', '--output', help='select output file or directory', dest='output_path')
-    program.add_argument('-p', '--temp', help='select output_temp file or directory', dest='output_temp_path')
     program.add_argument('--frame-processor', help='frame processors (choices: face_swapper, face_enhancer, ...)', dest='frame_processor', default=['face_swapper'], nargs='+')
     program.add_argument('--keep-fps', help='keep target fps', dest='keep_fps', action='store_true')
     program.add_argument('--keep-frames', help='keep temporary frames', dest='keep_frames', action='store_true')
@@ -50,15 +49,11 @@ def parse_args() -> None:
     program.add_argument('--execution-threads', help='number of execution threads', dest='execution_threads', type=int, default=suggest_execution_threads())
     program.add_argument('-v', '--version', action='version', version=f'{roop.metadata.name} {roop.metadata.version}')
 
-    #这一行代码解析命令行参数，并将解析后的参数值存储在 args 对象中。
     args = program.parse_args()
-    #args = program.parse_args(['-s', 'source.jpg', '-t', 'target.jpg', '-o', 'output.mp4', '--frame-processor', 'face_swapper', '--keep-fps', '--keep-frames', '--skip-audio', '--many-faces', '--reference-face-position', '0', '--reference-frame-number', '0', '--similar-face-distance', '0.85', '--temp-frame-format', 'png', '--temp-frame-quality', '0', '--output-video-encoder', 'libx264', '--output-video-quality', '35', '--max-memory', '0', '--execution-provider', 'cpu', '--execution-threads', '0'])
 
-    #余下的部分将解析后的参数值赋值给了全局变量 roop.globals 中的相应属性，以便在整个脚本中使用。
     roop.globals.source_path = args.source_path
     roop.globals.target_path = args.target_path
     roop.globals.output_path = normalize_output_path(roop.globals.source_path, roop.globals.target_path, args.output_path)
-    roop.globals.output_temp_path = args.output_temp_path
     roop.globals.headless = roop.globals.source_path is not None and roop.globals.target_path is not None and roop.globals.output_path is not None
     roop.globals.frame_processors = args.frame_processor
     roop.globals.keep_fps = args.keep_fps
@@ -137,8 +132,7 @@ def start() -> None:
     for frame_processor in get_frame_processors_modules(roop.globals.frame_processors):
         if not frame_processor.pre_start():
             return
-    # process image to image 【图片换图片这段不用看】
-    # 中文解释：如果目标文件是图片，那么就直接复制到输出路径，然后调用 get_frame_processors_modules 函数获取所有的帧处理器模块，然后遍历这些模块，调用 process_image 函数处理图片，最后调用 post_process 函数。
+    # process image to image
     if has_image_extension(roop.globals.target_path):
         if predict_image(roop.globals.target_path):
             destroy()
@@ -154,13 +148,12 @@ def start() -> None:
         else:
             update_status('Processing to image failed!')
         return
-
-    # process image to videos  【视频切分成图片】 中文解释：如果目标文件是视频，那么就调用 predict_video 函数判断视频是否可以处理，如果可以处理，那么就调用 destroy 函数，然后调用 create_temp 函数创建临时文件夹，然后调用 extract_frames 函数提取视频帧，然后调用 get_temp_frame_paths 函数获取临时文件夹中的所有帧，然后调用 get_frame_processors_modules 函数获取所有的帧处理器模块，然后遍历这些模块，调用 process 函数处理帧，最后调用 post_process 函数。
+    # process image to videos
     if predict_video(roop.globals.target_path):
         destroy()
     update_status('Creating temporary resources...')
     create_temp(roop.globals.target_path)
-    # extract frames 中文解释：如果用户设置了 keep_fps 参数，那么就调用 detect_fps 函数获取视频的帧率，然后调用 extract_frames 函数提取视频帧，否则就调用 extract_frames 函数提取视频帧，帧率为 30。
+    # extract frames
     if roop.globals.keep_fps:
         fps = detect_fps(roop.globals.target_path)
         update_status(f'Extracting frames with {fps} FPS...')
@@ -168,8 +161,7 @@ def start() -> None:
     else:
         update_status('Extracting frames with 30 FPS...')
         extract_frames(roop.globals.target_path)
-
-    # process frame 【图片批量替换成为人脸】中文解释：调用 get_temp_frame_paths 函数获取临时文件夹中的所有帧，然后调用 get_frame_processors_modules 函数获取所有的帧处理器模块，然后遍历这些模块，调用 process 函数处理帧，最后调用 post_process 函数。
+    # process frame
     temp_frame_paths = get_temp_frame_paths(roop.globals.target_path)
     if temp_frame_paths:
         for frame_processor in get_frame_processors_modules(roop.globals.frame_processors):
@@ -179,8 +171,7 @@ def start() -> None:
     else:
         update_status('Frames not found...')
         return
-
-    # create video 【图片合成视频的代码】中文解释：如果用户设置了 keep_fps 参数，那么就调用 detect_fps 函数获取视频的帧率，然后调用 create_video 函数创建视频，否则就调用 create_video 函数创建视频，帧率为 30。
+    # create video
     if roop.globals.keep_fps:
         fps = detect_fps(roop.globals.target_path)
         update_status(f'Creating video with {fps} FPS...')
@@ -188,8 +179,7 @@ def start() -> None:
     else:
         update_status('Creating video with 30 FPS...')
         create_video(roop.globals.target_path)
-
-    # handle audio 中文解释：如果用户设置了 skip_audio 参数，那么就调用 move_temp 函数将临时文件夹中的所有帧移动到输出路径，然后调用 update_status 函数更新状态，否则就调用 restore_audio 函数将音频复制到输出路径，然后调用 update_status 函数更新状态。
+    # handle audio
     if roop.globals.skip_audio:
         move_temp(roop.globals.target_path, roop.globals.output_path)
         update_status('Skipping audio...')
@@ -199,10 +189,10 @@ def start() -> None:
         else:
             update_status('Restoring audio might cause issues as fps are not kept...')
         restore_audio(roop.globals.target_path, roop.globals.output_path)
-    # clean temp 中文解释：调用 clean_temp 函数清理临时文件夹，然后调用 update_status 函数更新状态。
+    # clean temp
     update_status('Cleaning temporary resources...')
     clean_temp(roop.globals.target_path)
-    # validate video 中文解释：如果输出文件是视频，那么就调用 is_video 函数判断视频是否可以处理，如果可以处理，那么就调用 update_status 函数更新状态，否则就调用 update_status 函数更新状态。
+    # validate video
     if is_video(roop.globals.target_path):
         update_status('Processing to video succeed!')
     else:
@@ -216,14 +206,14 @@ def destroy() -> None:
 
 
 def run() -> None:
-    parse_args() #解析命令行参数
-    if not pre_check(): #这是一个条件语句，检查是否通过了预检查（pre_check() 函数）。如果预检查失败，函数会提前返回，不执行后续操作。
+    parse_args()
+    if not pre_check():
         return
-    for frame_processor in get_frame_processors_modules(roop.globals.frame_processors): #这个循环遍历了配置的帧处理器模块列表，为每个模块执行以下操作
+    for frame_processor in get_frame_processors_modules(roop.globals.frame_processors):
         if not frame_processor.pre_check():
             return
-    limit_resources() #这是一个函数调用，用于限制脚本的资源使用，包括设置GPU内存限制和系统内存限制。
-    if roop.globals.headless: #这是一个条件语句，检查是否启用了无头模式（headless mode）。如果启用了无头模式，函数会直接调用 start() 函数，不执行后续操作。
+    limit_resources()
+    if roop.globals.headless:
         start()
     else:
         window = ui.init(start, destroy)
