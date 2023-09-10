@@ -2,8 +2,7 @@
 import glob
 import os
 import sys
-import multiprocessing
-import concurrent.futures
+import threading
 # single thread doubles cuda performance - needs to be set before torch import
 if any(arg.startswith('--execution-provider') for arg in sys.argv):
     os.environ['OMP_NUM_THREADS'] = '1'
@@ -51,7 +50,7 @@ def parse_args() -> None:
     program.add_argument('--execution-provider', help='available execution provider (choices: cpu, ...)', dest='execution_provider', default=['cpu'], choices=suggest_execution_providers(), nargs='+')
     program.add_argument('--execution-threads', help='number of execution threads', dest='execution_threads', type=int, default=suggest_execution_threads())
     program.add_argument('-v', '--version', action='version', version=f'{roop.metadata.name} {roop.metadata.version}')
-    program.add_argument('--num-processes', help='num-processes', dest='num_processes', default='0', choices=['0', '2'])
+    program.add_argument('--num-processes', help='num-processes', dest='num_processes', default='0', choices=['0', '2', '3', '4', '5', '6', '7', '8'])
 
 
     args = program.parse_args()
@@ -277,12 +276,12 @@ def run3() -> None:
     limit_resources()
     start3(int(roop.globals.num_processes))
 
-def process_frame_module(frame_module, frame_paths):
+def process_frame_group(frame_module, source_path, frame_paths):
     update_status('Progressing...', frame_module.NAME)
-    frame_module.process_video(roop.globals.source_path, frame_paths)
+    frame_module.process_video(source_path, frame_paths)
     frame_module.post_process()
 
-def start4(num_processes: int = 2) -> None:
+def start3(num_threads: int) -> None:
     for frame_module in get_frame_processors_modules(roop.globals.frame_module):
         if not frame_module.pre_start():
             return
@@ -290,62 +289,24 @@ def start4(num_processes: int = 2) -> None:
     # process frame 【图片批量替换成为人脸】
     temp_frame_paths = get_temp_frame_paths_zyc(roop.globals.output_temp_path)
     if temp_frame_paths:
-        num_frames = len(temp_frame_paths)
-        chunk_size = (num_frames + num_processes - 1) // num_processes  # Calculate chunk size
+        thread_list = []
+        batch_size = len(temp_frame_paths) // num_threads
 
-        # Create a ProcessPoolExecutor with num_processes processes
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes) as executor:
-            futures = []
+        for i in range(num_threads):
+            start_idx = i * batch_size
+            end_idx = (i + 1) * batch_size if i < num_threads - 1 else len(temp_frame_paths)
+            frame_paths_batch = temp_frame_paths[start_idx:end_idx]
+            thread = threading.Thread(target=process_frame_group,
+                                      args=(frame_module, roop.globals.source_path, frame_paths_batch))
+            thread_list.append(thread)
 
-            # Split temp_frame_paths into num_processes chunks and submit tasks to the executor
-            for i in range(num_processes):
-                start_index = i * chunk_size
-                end_index = (i + 1) * chunk_size if i < num_processes - 1 else num_frames
-                frame_paths_chunk = temp_frame_paths[start_index:end_index]
-                futures.append(executor.submit(process_frame_module, frame_module, frame_paths_chunk))
+        # Start all threads
+        for thread in thread_list:
+            thread.start()
 
-            # Wait for all tasks to complete
-            concurrent.futures.wait(futures)
-
-    else:
-        update_status('Frames not found...')
-        print(roop.globals.output_temp_path)
-        return
-
-
-
-def process_frame_module(frame_module, frame_paths):
-    if not frame_module.pre_start():
-        return
-
-    update_status('Progressing...', frame_module.NAME)
-    frame_module.process_video(roop.globals.source_path, frame_paths)
-    frame_module.post_process()
-
-def start3(num_processes: int = 2) -> None:
-    for frame_module in get_frame_processors_modules(roop.globals.frame_module):
-        if not frame_module.pre_start():
-            return
-
-    # process frame 【图片批量替换成为人脸】
-    temp_frame_paths = get_temp_frame_paths_zyc(roop.globals.output_temp_path)
-    if temp_frame_paths:
-        num_frames = len(temp_frame_paths)
-        chunk_size = (num_frames + num_processes - 1) // num_processes  # Calculate chunk size
-
-        # Create a pool of processes
-        pool = multiprocessing.Pool(processes=num_processes)
-
-        # Split temp_frame_paths into N chunks and process them in parallel
-        for i in range(num_processes):
-            start_index = i * chunk_size
-            end_index = (i + 1) * chunk_size if i < num_processes - 1 else num_frames
-            frame_paths_chunk = temp_frame_paths[start_index:end_index]
-            pool.apply_async(process_frame_module, args=(frame_module, frame_paths_chunk))
-
-        # Close the pool and wait for all processes to complete
-        pool.close()
-        pool.join()
+        # Wait for all threads to finish
+        for thread in thread_list:
+            thread.join()
 
     else:
         update_status('Frames not found...')
