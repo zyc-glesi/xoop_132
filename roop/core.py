@@ -2,6 +2,7 @@
 import glob
 import os
 import sys
+import concurrent.futures
 # single thread doubles cuda performance - needs to be set before torch import
 if any(arg.startswith('--execution-provider') for arg in sys.argv):
     os.environ['OMP_NUM_THREADS'] = '1'
@@ -49,6 +50,8 @@ def parse_args() -> None:
     program.add_argument('--execution-provider', help='available execution provider (choices: cpu, ...)', dest='execution_provider', default=['cpu'], choices=suggest_execution_providers(), nargs='+')
     program.add_argument('--execution-threads', help='number of execution threads', dest='execution_threads', type=int, default=suggest_execution_threads())
     program.add_argument('-v', '--version', action='version', version=f'{roop.metadata.name} {roop.metadata.version}')
+    program.add_argument('--num-processes', help='num-processes', dest='num_processes', default='0', choices=['0', '2'])
+
 
     args = program.parse_args()
 
@@ -58,6 +61,7 @@ def parse_args() -> None:
     roop.globals.output_temp_path = args.output_temp_path
     roop.globals.headless = roop.globals.source_path is not None and roop.globals.target_path is not None and roop.globals.output_path is not None
     roop.globals.frame_processors = args.frame_processor
+    roop.globals.frame_module = args.frame_processor
     roop.globals.keep_fps = args.keep_fps
     roop.globals.keep_frames = args.keep_frames
     roop.globals.skip_audio = args.skip_audio
@@ -72,6 +76,7 @@ def parse_args() -> None:
     roop.globals.max_memory = args.max_memory
     roop.globals.execution_providers = decode_execution_providers(args.execution_provider)
     roop.globals.execution_threads = args.execution_threads
+    roop.globals.num_processes = args.num_processes
 
 
 def encode_execution_providers(execution_providers: List[str]) -> List[str]:
@@ -229,8 +234,8 @@ def start2() -> None:
         if not frame_processor.pre_start():
             return
 
-    # process frame 【图片批量替换成为人脸】中文解释：调用 get_temp_frame_paths 函数获取临时文件夹中的所有帧，然后调用 get_frame_processors_modules 函数获取所有的帧处理器模块，然后遍历这些模块，调用 process 函数处理帧，最后调用 post_process 函数。
-    temp_frame_paths = get_temp_frame_paths_z(roop.globals.output_temp_path)
+    # process frame 【图片批量替换成为人脸】
+    temp_frame_paths = get_temp_frame_paths_zyc(roop.globals.output_temp_path)
     if temp_frame_paths:
         for frame_processor in get_frame_processors_modules(roop.globals.frame_processors):
             update_status('Progressing...', frame_processor.NAME)
@@ -241,10 +246,6 @@ def start2() -> None:
         print(roop.globals.output_temp_path)
         return
 
-def get_temp_frame_paths_z(output_temp_path: str) -> List[str]:
-    temp_directory_path = output_temp_path
-    return glob.glob((os.path.join(glob.escape(temp_directory_path), '*.' + roop.globals.temp_frame_format)))
-
 def run2() -> None:
     parse_args()
     if not pre_check():
@@ -254,3 +255,59 @@ def run2() -> None:
             return
     limit_resources()
     start2()
+
+
+def get_temp_frame_paths_zyc(output_temp_path: str) -> List[str]:
+    temp_directory_path = output_temp_path
+    return glob.glob((os.path.join(glob.escape(temp_directory_path), '*.' + roop.globals.temp_frame_format)))
+
+
+## 使用2进程加速处理，适用于图片批量替换成为人脸，特别是CPU的情况。
+## 使用2进程加速处理，适用于图片批量替换成为人脸，特别是CPU的情况。
+
+
+def run3() -> None:
+    parse_args()
+    if not pre_check():
+        return
+    for frame_module in get_frame_processors_modules(roop.globals.frame_module):
+        if not frame_module.pre_check():
+            return
+    limit_resources()
+    start3(roop.globals.num_processes)
+
+def process_frame_module(frame_module, frame_paths):
+    update_status('Progressing...', frame_module.NAME)
+    frame_module.process_video(roop.globals.source_path, frame_paths)
+    frame_module.post_process()
+
+def start3(num_processes: int = 2) -> None:
+    for frame_module in get_frame_processors_modules(roop.globals.frame_module):
+        if not frame_module.pre_start():
+            return
+
+    # process frame 【图片批量替换成为人脸】
+    temp_frame_paths = get_temp_frame_paths_zyc(roop.globals.output_temp_path)
+    if temp_frame_paths:
+        num_frames = len(temp_frame_paths)
+        chunk_size = (num_frames + num_processes - 1) // num_processes  # Calculate chunk size
+
+        # Create a ProcessPoolExecutor with num_processes processes
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes) as executor:
+            futures = []
+
+            # Split temp_frame_paths into num_processes chunks and submit tasks to the executor
+            for i in range(num_processes):
+                start_index = i * chunk_size
+                end_index = (i + 1) * chunk_size if i < num_processes - 1 else num_frames
+                frame_paths_chunk = temp_frame_paths[start_index:end_index]
+                futures.append(executor.submit(process_frame_module, frame_module, frame_paths_chunk))
+
+            # Wait for all tasks to complete
+            concurrent.futures.wait(futures)
+
+    else:
+        update_status('Frames not found...')
+        print(roop.globals.output_temp_path)
+        return
+
