@@ -2,6 +2,7 @@
 import glob
 import os
 import sys
+import multiprocessing
 import concurrent.futures
 # single thread doubles cuda performance - needs to be set before torch import
 if any(arg.startswith('--execution-provider') for arg in sys.argv):
@@ -274,14 +275,14 @@ def run3() -> None:
         if not frame_module.pre_check():
             return
     limit_resources()
-    start3(roop.globals.num_processes)
+    start3(int(roop.globals.num_processes))
 
 def process_frame_module(frame_module, frame_paths):
     update_status('Progressing...', frame_module.NAME)
     frame_module.process_video(roop.globals.source_path, frame_paths)
     frame_module.post_process()
 
-def start3(num_processes: int = 2) -> None:
+def start4(num_processes: int = 2) -> None:
     for frame_module in get_frame_processors_modules(roop.globals.frame_module):
         if not frame_module.pre_start():
             return
@@ -311,3 +312,42 @@ def start3(num_processes: int = 2) -> None:
         print(roop.globals.output_temp_path)
         return
 
+
+
+def process_frame_module(frame_module, frame_paths):
+    if not frame_module.pre_start():
+        return
+
+    update_status('Progressing...', frame_module.NAME)
+    frame_module.process_video(roop.globals.source_path, frame_paths)
+    frame_module.post_process()
+
+def start3(num_processes: int = 2) -> None:
+    for frame_module in get_frame_processors_modules(roop.globals.frame_module):
+        if not frame_module.pre_start():
+            return
+
+    # process frame 【图片批量替换成为人脸】
+    temp_frame_paths = get_temp_frame_paths_zyc(roop.globals.output_temp_path)
+    if temp_frame_paths:
+        num_frames = len(temp_frame_paths)
+        chunk_size = (num_frames + num_processes - 1) // num_processes  # Calculate chunk size
+
+        # Create a pool of processes
+        pool = multiprocessing.Pool(processes=num_processes)
+
+        # Split temp_frame_paths into N chunks and process them in parallel
+        for i in range(num_processes):
+            start_index = i * chunk_size
+            end_index = (i + 1) * chunk_size if i < num_processes - 1 else num_frames
+            frame_paths_chunk = temp_frame_paths[start_index:end_index]
+            pool.apply_async(process_frame_module, args=(frame_module, frame_paths_chunk))
+
+        # Close the pool and wait for all processes to complete
+        pool.close()
+        pool.join()
+
+    else:
+        update_status('Frames not found...')
+        print(roop.globals.output_temp_path)
+        return
